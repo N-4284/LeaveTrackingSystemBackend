@@ -28,6 +28,37 @@ app.get('/test-db', async (req, res) => {
     }
 });
 
+app.post('/Login', async(req, res) => {
+    try{
+        const { username, password } = req.body;
+        const query = `SELECT * FROM Users WHERE name = @name AND hashedPassword = @hashedPassword`;
+        const result = await pool.request()
+            .input('name', sql.VarChar, username)
+            .input('hashedPassword', sql.VarChar, password)
+            .query(query);
+        
+        if (result.recordset.length > 0) {
+            res.status(200).json({
+                success: true,
+                message: 'Login successful',
+                data: result.recordset[0]
+            });
+        } else {
+            res.status(401).json({
+                success: false,
+                message: 'Invalid username or password'
+            });
+        }
+    }
+    catch (err) {
+        console.error('SQL error', err);
+        res.status(500).json({
+            success: false,
+            message: 'Database query failed',
+            error: err.message
+        });
+    }
+});
 
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
