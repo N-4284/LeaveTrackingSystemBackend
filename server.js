@@ -2,8 +2,12 @@
 const express = require('express');
 require('dotenv').config();
 const { sql, pool, poolConnect, GetMethod } = require('./db');
+const cors = require('cors');
+
 
 const app = express();
+app.use(cors());
+app.use(express.json());
 const PORT = parseInt(process.env.PORT, 10);
 
 // Test 
