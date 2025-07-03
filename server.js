@@ -3,12 +3,49 @@ const express = require('express');
 require('dotenv').config();
 const { sql, pool, poolConnect, GetMethod } = require('./db');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const secretKey = process.env.JWT_SECRET;
 
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 const PORT = parseInt(process.env.PORT, 10);
+
+
+const authMiddleware = async(req, res, next) => {
+    const token = req.header('Authorization')?.replace('Bearer ', '');  
+
+    if (!token) {
+        return res.status(401).json({ message: 'Access denied. No token provided.' });
+    }
+    try {
+        const decoded = jwt.verify(token, secretKey);
+
+        const query = `SELECT userID, roleName FROM Users JOIN Roles ON Users.roleID = Roles.roleID WHERE userID = @userID`;
+
+        const result = await pool.request()
+            .input('userID', sql.Int, decoded.sub)
+            .query(query);
+
+        const user= result.recordset[0];
+        if (!decoded.sub || !decoded.role) {
+          
+            return res.status(400).json({ message: decoded });
+        }
+
+        if(user.userID !== decoded.sub || user.roleName !== decoded.role) {
+            return res.status(403).json({ message: 'Access denied. Invalid token.' });
+        }
+
+        req.user = { userID: decoded.sub, role :decoded.role };  
+        next();
+    } catch (err) {
+        console.error('JWT verification failed:', err.message);
+        res.status(401).json({ message: 'Invalid token' });
+    }
+};
+
 
 // Test 
 app.get('/test-db', async (req, res) => {
@@ -29,7 +66,7 @@ app.get('/test-db', async (req, res) => {
 });
 
 
-app.get('/Attendance', async (req,res) =>{
+app.get('/Attendance', authMiddleware, async (req,res) =>{
     try{
         const result = await GetMethod('SELECT a.attendanceID, a.userID, a.date, lt.leaveTypeName AS status FROM Attendance AS a JOIN LeaveTypes lt ON a.attendanceStatusID = lt.leaveTypeID ORDER BY a.date DESC');
         res.json(result.recordset);
@@ -40,7 +77,7 @@ app.get('/Attendance', async (req,res) =>{
     
 });
 
-app.post('/Attendance', async (req, res) => {
+app.post('/Attendance', authMiddleware, async (req, res) => {
     const { userID, date } = req.body;  //date format should be YYYY-MM-DD
 
     const currentDate = new Date();
@@ -71,18 +108,25 @@ app.post('/Attendance', async (req, res) => {
 app.post('/Login', async(req, res) => {
     try{
         const { email, password } = req.body;
-        const query = `SELECT * FROM Users WHERE email = @email AND hashedPassword = @hashedPassword`;
+        const query = `SELECT userID, roleName FROM Users JOIN Roles ON Users.roleID = Roles.roleID WHERE email = @email AND hashedPassword = @hashedPassword`;
 
         const result = await pool.request()
             .input('email', sql.VarChar, email)
             .input('hashedPassword', sql.VarChar, password)
             .query(query);
-        
+
+        const user= result.recordset[0];
+
         if (result.recordset.length > 0) {
+            const token = jwt.sign({ sub: user.userID , role:user.roleName}, secretKey, { expiresIn: '1h' });
+            
             res.status(200).json({
                 success: true,
                 message: 'Login successful',
-                data: result.recordset[0]
+                data: {
+                    token: token
+                }
+
             });
         } else {
             res.status(401).json({
