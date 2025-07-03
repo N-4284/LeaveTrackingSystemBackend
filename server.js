@@ -61,10 +61,11 @@ app.post('/Attendance', async (req, res) => {
 
 app.post('/Login', async(req, res) => {
     try{
-        const { username, password } = req.body;
-        const query = `SELECT * FROM Users WHERE name = @name AND hashedPassword = @hashedPassword`;
+        const { email, password } = req.body;
+        const query = `SELECT * FROM Users WHERE email = @email AND hashedPassword = @hashedPassword`;
+
         const result = await pool.request()
-            .input('name', sql.VarChar, username)
+            .input('email', sql.VarChar, email)
             .input('hashedPassword', sql.VarChar, password)
             .query(query);
         
@@ -77,7 +78,7 @@ app.post('/Login', async(req, res) => {
         } else {
             res.status(401).json({
                 success: false,
-                message: 'Invalid username or password'
+                message: 'Invalid Email or Password'
             });
         }
     }
@@ -92,5 +93,5 @@ app.post('/Login', async(req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+    console.log(`Server is running on port ${PORT}\n\n\thttp://localhost:${PORT}/\n`);
 });
