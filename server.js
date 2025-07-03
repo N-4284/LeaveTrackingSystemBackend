@@ -41,20 +41,29 @@ app.get('/Attendance', async (req,res) =>{
 });
 
 app.post('/Attendance', async (req, res) => {
-    const { userId, date, attendanceStatusId } = req.body;
+    const { userID, date } = req.body;  //date format should be YYYY-MM-DD
+
+    const currentDate = new Date();
+    const formattedDate = currentDate.toISOString().split('T')[0];
+
+    if (formattedDate !== date) {
+        return res.status(400).json({ error: 'Your Systems date is Invalid.'});
+    }
 
     try {
-        const pool = await sql.connect(dbConfig);
         await pool.request()
-            .input('userID', sql.Int, userId)
+            .input('userID', sql.Int, userID)
             .input('date', sql.Date, date)
-            .input('attendanceStatusID', sql.Int, attendanceStatusId)
+            .input('attendanceStatusID', sql.Int, 1) //Logging attendance as 'Present' others are done through request confirmation by higher ups
             .execute('AddAttendance');
 
         res.status(201).json({ message: 'Attendance marked successfully.' });
     } catch (error) {
+        if (error && (error.number === 2627 || error.number === 2601)) {
+            return res.status(409).json({ error: 'Attendance already Set (For any correction contact Manager or put in a request)' });
+        }
         console.error(error);
-        res.status(500).json({ error: 'Failed to mark attendance.' });
+        res.status(500).json({ error: 'Failed to mark attendance.'});
     }
 });
 
