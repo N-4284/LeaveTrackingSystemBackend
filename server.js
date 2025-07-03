@@ -101,6 +101,26 @@ app.post('/Login', async(req, res) => {
     }
 });
 
+app.get('/MonthlyAttendance', async (req, res) => {
+    const { month, year } = req.query;
+
+    try {
+        const result = await GetMethod(`
+            SELECT a.userID, u.name, a.date, lt.leaveTypeName AS status
+            FROM Attendance AS a
+            JOIN Users AS u ON a.userID = u.userID
+            JOIN LeaveTypes AS lt ON a.attendanceStatusID = lt.leaveTypeID
+            WHERE MONTH(a.date) = ${month} AND YEAR(a.date) = ${year}
+            ORDER BY a.userID, a.date
+        `);
+        res.json(result.recordset);
+    } catch (err) {
+        console.error('Error fetching monthly attendance:', err);
+        res.status(500).send('Failed to fetch monthly attendance');
+    }
+});
+
+
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}\n\n\thttp://localhost:${PORT}/\n`);
 });
