@@ -108,7 +108,11 @@ app.post('/Attendance', authMiddleware, async (req, res) => {
 app.post('/Login', async(req, res) => {
     try{
         const { email, password } = req.body;
-        const query = `SELECT userID, roleName FROM Users JOIN Roles ON Users.roleID = Roles.roleID WHERE email = @email AND hashedPassword = @hashedPassword`;
+
+        const query = `SELECT userID, roleName 
+                       FROM Users JOIN Roles ON Users.roleID = Roles.roleID 
+                       WHERE email = @email AND hashedPassword = @hashedPassword`;
+
 
         const result = await pool.request()
             .input('email', sql.VarChar, email)
@@ -163,6 +167,200 @@ app.get('/MonthlyAttendance', async (req, res) => {
         res.status(500).send('Failed to fetch monthly attendance');
     }
 });
+
+app.get('/LeaveRequest/My', async (req, res) =>{
+    const { userID } = req.query;
+    try {
+        const result = await GetMethod(`
+            SELECT lr.RequestID, lr.userID, u.name, lt.leaveTypeName, lr.startDate, lr.endDate, lr.reason, lr.processedStatusID, lr.submittedAt
+            FROM LeaveRequests AS lr
+            JOIN Users AS u ON lr.userID = u.userID
+            JOIN LeaveTypes AS lt ON lr.leaveID = lt.leaveTypeID
+            WHERE lr.userID = ${userID}
+            ORDER BY lr.submittedAt DESC
+        `);
+        res.json(result.recordset);
+    } catch (err) {
+        console.error('Error fetching leave requests:', err);
+        res.status(500).send('Failed to fetch leave requests');
+    }
+});
+
+app.post('/LeaveRequestByName', async (req, res) => {
+    const { name, leaveTypeName, startDate, endDate, reason } = req.body;
+
+    try {
+        await poolConnect;
+
+        const userResult = await pool.request()
+            .input('name', sql.VarChar, name)
+            .query('SELECT userID FROM Users WHERE name = @name');
+
+        if (userResult.recordset.length === 0) {
+            return res.status(404).json({ error: 'User not found.' });
+        }
+        const userID = userResult.recordset[0].userID;
+
+        const leaveResult = await pool.request()
+            .input('leaveTypeName', sql.VarChar, leaveTypeName)
+            .query('SELECT leaveTypeID FROM LeaveTypes WHERE leaveTypeName = @leaveTypeName');
+
+        const leaveID = leaveResult.recordset[0].leaveTypeID;
+
+        await pool.request()
+            .input('userID', sql.Int, userID)
+            .input('leaveID', sql.Int, leaveID)
+            .input('startDate', sql.Date, startDate)
+            .input('endDate', sql.Date, endDate)
+            .input('reason', sql.NVarChar, reason)
+            .input('processedStatusID', sql.Int, 0) 
+            .query(`
+                INSERT INTO LeaveRequests (userID, leaveID, startDate, endDate, reason, processedStatusID, submittedAt)
+                VALUES (@userID, @leaveID, @startDate, @endDate, @reason, @processedStatusID, GETDATE())
+            `);
+
+        res.status(201).json({ message: 'Leave request submitted successfully.' });
+
+    } catch (error) {
+        console.error('Error submitting leave request:', error);
+        res.status(500).json({ error: 'Failed to submit leave request.' });
+    }
+});
+
+
+app.put('/LeaveRequest/Edit', async (req, res) => {
+    try {
+        const { leaveRequestID, leaveTypeName, startDate, endDate, reason } = req.body;
+
+        if (!leaveRequestID || !leaveTypeName || !startDate || !endDate || !reason) {
+            return res.status(400).json({ error: 'All fields are required.' });
+        }
+
+        await poolConnect;
+        const leaveResult = await pool.request()
+            .input('leaveTypeName', sql.VarChar, leaveTypeName)
+            .query('SELECT leaveTypeID FROM LeaveTypes WHERE leaveTypeName = @leaveTypeName');
+
+        if (leaveResult.recordset.length === 0) {
+            return res.status(404).json({ error: 'Leave type not found.' });
+        }
+
+        const leaveID = leaveResult.recordset[0].leaveTypeID;
+
+        await pool.request()
+            .input('leaveRequestID', sql.Int, leaveRequestID)
+            .input('leaveID', sql.Int, leaveID)
+            .input('startDate', sql.Date, startDate)
+            .input('endDate', sql.Date, endDate)
+            .input('reason', sql.VarChar, reason)
+            .query(`
+                UPDATE LeaveRequests
+                SET leaveID = @leaveID, startDate = @startDate, endDate = @endDate, reason = @reason, submittedAt = GETDATE()
+                WHERE requestID = @leaveRequestID AND processedStatusID = 0
+            `);
+
+        res.status(200).json({ message: 'Leave request updated successfully.' });
+    } catch (error) {
+        console.error('Error updating leave request:', error);
+        res.status(500).send('Failed to update leave request');
+    }
+});
+
+
+app.delete('/LeaveRequest/Delete/:requestID', async (req, res) => {
+    const { requestID } = req.params;
+
+    try {
+        const result = await pool.request()
+            .input('requestID', sql.Int, requestID)
+            .query(`
+                DELETE FROM LeaveRequests
+                WHERE requestID = @requestID AND processedStatusID = 0
+            `);
+
+        if (result.rowsAffected[0] === 0) {
+            return res.status(404).json({ error: 'Request not found or cannot delete approved/denied requests.' });
+        }
+
+        res.json({ message: 'Leave request deleted successfully.' });
+    } catch (error) {
+        console.error('Error deleting leave request:', error);
+        res.status(500).json({ error: 'Failed to delete leave request.' });
+    }
+});
+
+app.get('/LeaveRequest', async (req, res) => {
+    const { name } = req.query;
+
+    try {
+        await poolConnect;
+
+        const managerResult = await pool.request()
+            .input('name', sql.VarChar, name)
+            .query(`SELECT userID, roleID FROM Users WHERE name = @name`);
+
+        if (managerResult.recordset.length === 0) {
+            return res.status(404).json({ error: 'Manager not found.' });
+        }
+
+        const { userID: managerID, roleID } = managerResult.recordset[0];
+
+        if (roleID !== 2) { 
+            return res.status(403).json({ error: 'Unauthorized. Only managers can view this data.' });
+        }
+
+        const result = await GetMethod(`
+            SELECT lr.RequestID, lr.userID, u.name, lt.leaveTypeName, lr.startDate, lr.endDate, lr.reason, lr.processedStatusID, lr.submittedAt
+            FROM LeaveRequests AS lr
+            JOIN Users AS u ON lr.userID = u.userID
+            JOIN LeaveTypes AS lt ON lr.leaveID = lt.leaveTypeID
+            WHERE u.managerID = ${managerID}
+            ORDER BY lr.submittedAt DESC
+        `);
+
+        res.json(result.recordset);
+
+    } catch (error) {
+        console.error('Error fetching leave requests:', error);
+        res.status(500).send('Failed to fetch leave requests');
+    }
+});
+
+app.put('/LeaveRequest/Process', async (req, res) => {
+    const { requestID, statusName, approvedBy } = req.body; 
+
+    try {
+        await poolConnect;
+
+        const statusResult = await pool.request()
+            .input('statusName', sql.VarChar, statusName)
+            .query(`SELECT processedStatusID FROM LeaveStatus WHERE statusName = @statusName`);
+
+        if (statusResult.recordset.length === 0) {
+            return res.status(404).json({ error: 'Invalid status name.' });
+        }
+
+        const statusID = statusResult.recordset[0].processedStatusID;
+
+        await pool.request()
+            .input('requestID', sql.Int, requestID)
+            .input('statusID', sql.Int, statusID)
+            .input('approvedBy', sql.Int, approvedBy)
+            .query(`
+                UPDATE LeaveRequests
+                SET processedStatusID = @statusID, ApprovedBy = @approvedBy, ProcessedAt = GETDATE()
+                WHERE requestID = @requestID AND processedStatusID = 0
+            `);
+
+        res.json({ message: 'Leave request processed.' });
+    } catch (error) {
+        console.error('Error processing leave request:', error);
+        res.status(500).send('Failed to process leave request.');
+    }
+});
+
+
+
 
 
 app.listen(PORT, () => {
