@@ -65,7 +65,7 @@ app.get('/test-db', async (req, res) => {
     }
 });
 
-
+//Get user attendance
 app.get('/Attendance', authMiddleware, async (req,res) =>{
     try{
         const result = await GetMethod('SELECT a.attendanceID, a.userID, a.date, lt.leaveTypeName AS status FROM Attendance AS a JOIN LeaveTypes lt ON a.attendanceStatusID = lt.leaveTypeID ORDER BY a.date DESC');
@@ -77,6 +77,7 @@ app.get('/Attendance', authMiddleware, async (req,res) =>{
     
 });
 
+// Mark Attendance
 app.post('/Attendance', authMiddleware, async (req, res) => {
     const { userID, date } = req.body;  //date format should be YYYY-MM-DD
 
@@ -104,7 +105,7 @@ app.post('/Attendance', authMiddleware, async (req, res) => {
     }
 });
 
-
+// User Login
 app.post('/Login', async(req, res) => {
     try{
         const { email, password } = req.body;
@@ -147,6 +148,7 @@ app.post('/Login', async(req, res) => {
     }
 });
 
+//Get User Information
 app.get('/user-info', authMiddleware, async (req, res) => {
     try {
         const { userID } = req.user;  
@@ -168,6 +170,7 @@ app.get('/user-info', authMiddleware, async (req, res) => {
     }
 });
 
+//Get Attendance by UserID
 app.get('/MonthlyAttendance', async (req, res) => {
     const { month, year } = req.query;
 
@@ -187,6 +190,7 @@ app.get('/MonthlyAttendance', async (req, res) => {
     }
 });
 
+//Get Leave Types
 app.get('/LeaveRequest/My', async (req, res) =>{
     const { userID } = req.query;
     try {
@@ -205,6 +209,7 @@ app.get('/LeaveRequest/My', async (req, res) =>{
     }
 });
 
+//User submit leave request by name
 app.post('/LeaveRequestByName', async (req, res) => {
     const { name, leaveTypeName, startDate, endDate, reason } = req.body;
 
@@ -246,7 +251,7 @@ app.post('/LeaveRequestByName', async (req, res) => {
     }
 });
 
-
+//User edit leave request
 app.put('/LeaveRequest/Edit', async (req, res) => {
     try {
         const { leaveRequestID, leaveTypeName, startDate, endDate, reason } = req.body;
@@ -285,7 +290,7 @@ app.put('/LeaveRequest/Edit', async (req, res) => {
     }
 });
 
-
+//User delete leave request
 app.delete('/LeaveRequest/Delete/:requestID', async (req, res) => {
     const { requestID } = req.params;
 
@@ -345,6 +350,7 @@ app.get('/LeaveRequest', async (req, res) => {
     }
 });
 
+//Manager process leave request
 app.put('/LeaveRequest/Process', async (req, res) => {
     const { requestID, statusName, approvedBy } = req.body; 
 
@@ -378,6 +384,7 @@ app.put('/LeaveRequest/Process', async (req, res) => {
     }
 });
 
+
 app.post('/users', authMiddleware, async (req, res) => {
     const { role } = req.user;
 
@@ -385,16 +392,16 @@ app.post('/users', authMiddleware, async (req, res) => {
         return res.status(403).json({ error: 'Access denied. Admins only.' });
     }
 
-    const { name, email, password, roleName, managerID } = req.body;
+    const { name, email, password, roleName, managerName } = req.body;
 
     if (!name || !email || !password || !roleName) {
-        return res.status(400).json({ error: 'All fields (except managerID) are required.' });
+        return res.status(400).json({ error: 'All fields (except managerName) are required.' });
     }
 
     try {
         await poolConnect;
 
-        // Find roleID from roleName
+        // Get roleID from roleName
         const roleResult = await pool.request()
             .input('roleName', sql.VarChar, roleName)
             .query(`SELECT roleID FROM Roles WHERE roleName = @roleName`);
@@ -405,13 +412,28 @@ app.post('/users', authMiddleware, async (req, res) => {
 
         const roleID = roleResult.recordset[0].roleID;
 
-        // Insert new user
+        let managerID = null;
+
+        // If managerName is provided, find the corresponding userID
+        if (managerName) {
+            const managerResult = await pool.request()
+                .input('managerName', sql.VarChar, managerName)
+                .query(`SELECT userID FROM Users WHERE name = @managerName`);
+
+            if (managerResult.recordset.length === 0) {
+                return res.status(400).json({ error: 'Manager not found.' });
+            }
+
+            managerID = managerResult.recordset[0].userID;
+        }
+
+        // Insert the new user
         await pool.request()
             .input('name', sql.VarChar, name)
             .input('email', sql.VarChar, email)
-            .input('hashedPassword', sql.VarChar, password) // ➤ Please replace with hashed password in production
+            .input('hashedPassword', sql.VarChar, password)
             .input('roleID', sql.Int, roleID)
-            .input('managerID', sql.Int, managerID || null)
+            .input('managerID', sql.Int, managerID)
             .query(`
                 INSERT INTO Users (name, email, hashedPassword, roleID, managerID)
                 VALUES (@name, @email, @hashedPassword, @roleID, @managerID)
@@ -422,7 +444,6 @@ app.post('/users', authMiddleware, async (req, res) => {
     } catch (error) {
         console.error('Error creating user:', error);
 
-        // Handle duplicate email error (SQL Server error 2627 or 2601)
         if (error.number === 2627 || error.number === 2601) {
             return res.status(409).json({ error: 'Email already exists.' });
         }
@@ -431,6 +452,24 @@ app.post('/users', authMiddleware, async (req, res) => {
     }
 });
 
+//get Managers
+app.get('/users/managers', authMiddleware, async (req, res) => {
+    try {
+        await poolConnect;
+
+        const result = await pool.request().query(`
+            SELECT u.userID, u.name
+            FROM Users u
+            INNER JOIN Roles r ON u.roleID = r.roleID
+            WHERE r.roleName = 'Manager'
+        `);
+
+        res.json({ managers: result.recordset });
+    } catch (error) {
+        console.error('Error fetching managers:', error);
+        res.status(500).json({ error: 'Failed to fetch managers.' });
+    }
+});
 
 
 
