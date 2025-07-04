@@ -147,6 +147,27 @@ app.post('/Login', async(req, res) => {
     }
 });
 
+app.get('/user-info', authMiddleware, async (req, res) => {
+    try {
+        const { userID } = req.user;  
+
+        const query =  `SELECT userId, name, email, roleName, ManagerID 
+                        FROM Users JOIN Roles ON Users.roleID = Roles.roleID
+                        WHERE Users.userID = @userID;`;
+        const result = await pool.request()
+            .input('userID', sql.Int,userID)
+            .query(query);
+        
+        res.status(200).json(result.recordset[0]);
+
+    }catch (err) {
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch user information',
+        });
+    }
+});
+
 app.get('/MonthlyAttendance', async (req, res) => {
     const { month, year } = req.query;
 
