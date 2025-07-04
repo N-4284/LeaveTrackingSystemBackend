@@ -151,7 +151,7 @@ app.get('/user-info', authMiddleware, async (req, res) => {
     try {
         const { userID } = req.user;  
 
-        const query =  `SELECT userId, name, email, roleName, ManagerID 
+        const query =  `SELECT userID, name, email, roleName, ManagerID 
                         FROM Users JOIN Roles ON Users.roleID = Roles.roleID
                         WHERE Users.userID = @userID;`;
         const result = await pool.request()
