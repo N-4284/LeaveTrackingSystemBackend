@@ -127,9 +127,7 @@ app.post('/Login', async(req, res) => {
             res.status(200).json({
                 success: true,
                 message: 'Login successful',
-                data: {
-                    token: token
-                }
+                token: token
 
             });
         } else {
