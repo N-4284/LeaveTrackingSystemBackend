@@ -378,6 +378,58 @@ app.put('/LeaveRequest/Process', async (req, res) => {
     }
 });
 
+app.post('/users', authMiddleware, async (req, res) => {
+    const { role } = req.user;
+
+    if (role !== 'Admin') {
+        return res.status(403).json({ error: 'Access denied. Admins only.' });
+    }
+
+    const { name, email, password, roleName, managerID } = req.body;
+
+    if (!name || !email || !password || !roleName) {
+        return res.status(400).json({ error: 'All fields (except managerID) are required.' });
+    }
+
+    try {
+        await poolConnect;
+
+        // Find roleID from roleName
+        const roleResult = await pool.request()
+            .input('roleName', sql.VarChar, roleName)
+            .query(`SELECT roleID FROM Roles WHERE roleName = @roleName`);
+
+        if (roleResult.recordset.length === 0) {
+            return res.status(400).json({ error: 'Invalid role name.' });
+        }
+
+        const roleID = roleResult.recordset[0].roleID;
+
+        // Insert new user
+        await pool.request()
+            .input('name', sql.VarChar, name)
+            .input('email', sql.VarChar, email)
+            .input('hashedPassword', sql.VarChar, password) // ➤ Please replace with hashed password in production
+            .input('roleID', sql.Int, roleID)
+            .input('managerID', sql.Int, managerID || null)
+            .query(`
+                INSERT INTO Users (name, email, hashedPassword, roleID, managerID)
+                VALUES (@name, @email, @hashedPassword, @roleID, @managerID)
+            `);
+
+        res.status(201).json({ message: 'User created successfully.' });
+
+    } catch (error) {
+        console.error('Error creating user:', error);
+
+        // Handle duplicate email error (SQL Server error 2627 or 2601)
+        if (error.number === 2627 || error.number === 2601) {
+            return res.status(409).json({ error: 'Email already exists.' });
+        }
+
+        res.status(500).json({ error: 'Failed to create user.' });
+    }
+});
 
 
 
