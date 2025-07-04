@@ -71,7 +71,11 @@ app.post('/Attendance', async (req, res) => {
 app.post('/Login', async(req, res) => {
     try{
         const { email, password } = req.body;
-        const query = `SELECT * FROM Users WHERE email = @email AND hashedPassword = @hashedPassword`;
+        const query = `SELECT Users.*, Roles.roleName 
+                    FROM Users 
+                    JOIN Roles ON Users.roleID = Roles.roleID
+                    WHERE Users.email = @email AND Users.hashedPassword = @hashedPassword
+                `;
 
         const result = await pool.request()
             .input('email', sql.VarChar, email)
@@ -79,10 +83,12 @@ app.post('/Login', async(req, res) => {
             .query(query);
         
         if (result.recordset.length > 0) {
+            const user = result.recordset[0];
+
             res.status(200).json({
                 success: true,
                 message: 'Login successful',
-                data: result.recordset[0]
+                role: user.roleName           
             });
         } else {
             res.status(401).json({
