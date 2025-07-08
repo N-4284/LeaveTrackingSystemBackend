@@ -5,6 +5,7 @@ const { sql, pool, poolConnect, GetMethod } = require('./db');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const secretKey = process.env.JWT_SECRET;
+const bcrypt = require('bcrypt');
 
 
 const app = express();
@@ -110,39 +111,42 @@ app.post('/Login', async(req, res) => {
     try{
         const { email, password } = req.body;
 
-        const query = `SELECT userID, roleName 
+        const query = `SELECT userID, roleName, hashedPassword
                        FROM Users JOIN Roles ON Users.roleID = Roles.roleID 
-                       WHERE email = @email AND hashedPassword = @hashedPassword`;
+                       WHERE email = @email`;
 
 
         const result = await pool.request()
             .input('email', sql.VarChar, email)
-            .input('hashedPassword', sql.VarChar, password)
             .query(query);
 
         const user= result.recordset[0];
+         
+        if (user) {
+            const isValid = await bcrypt.compare(password, user.hashedPassword);
 
-        if (result.recordset.length > 0) {
-            const token = jwt.sign({ sub: user.userID , role:user.roleName}, secretKey, { expiresIn: '1h' });
-            
-            res.status(200).json({
-                success: true,
-                message: 'Login successful',
-                token: token
+            if (isValid) {
+                const token = jwt.sign({ sub: user.userID , role:user.roleName}, secretKey, { expiresIn: '1h' });
+                
+                return res.status(200).json({
+                    success: true,
+                    message: 'Login successful',
+                    token: token
 
-            });
-        } else {
-            res.status(401).json({
-                success: false,
-                message: 'Invalid Email or Password'
-            });
+                });
+            }
         }
+        return res.status(401).json({
+            success: false,
+            message: 'Invalid Email or Password'
+        });
+        
     }
     catch (err) {
         console.error('SQL error', err);
         res.status(500).json({
             success: false,
-            message: 'Database query failed',
+            message: 'Invalid Email or Password',
             error: err.message
         });
     }
@@ -392,11 +396,13 @@ app.post('/users', authMiddleware, async (req, res) => {
             managerID = managerResult.recordset[0].userID;
         }
 
+        const hashedPassword = await bcrypt.hash(password, 9); // here 9 is the strength of the hashing (called salt rounds for some reason)
+
         // Insert the new user
         await pool.request()
             .input('name', sql.VarChar, name)
             .input('email', sql.VarChar, email)
-            .input('hashedPassword', sql.VarChar, password)
+            .input('hashedPassword', sql.VarChar, hashedPassword)
             .input('roleID', sql.Int, roleID)
             .input('managerID', sql.Int, managerID)
             .query(`
